@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indie 2D: Sistema de Munición y Recarga</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0b0b16;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 5px;
+            font-size: 18px;
+            color: #ff3366;
+            text-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
+            z-index: 10;
+        }
+        #canvas-container {
+            position: relative;
+            border: 4px solid #00ffff;
+            box-shadow: 0 0 25px rgba(0, 255, 255, 0.4);
+            border-radius: 4px;
+            width: 600px;
+            height: 350px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            background-image: url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1000&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+        }
+        .instructions {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #a5b1c2;
+            text-align: center;
+            line-height: 1.4;
+            z-index: 10;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 15px;
+            font-weight: bold;
+            color: #00ffff;
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #00ffff;
+            z-index: 10;
+        }
+        #ammo-display {
+            margin-top: 5px;
+            color: #ffaa00;
+        }
+        #health-orb-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #00a8ff;
+            z-index: 10;
+        }
+        .orb-title {
+            font-size: 12px;
+            color: #00a8ff;
+            margin-bottom: 5px;
+        }
+        #liquid-orb {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid #00a8ff;
+            background: #111;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 10px rgba(0, 168, 255, 0.5) inset;
+        }
+        #liquid-level {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to top, #0097e3, #00a8ff);
+            transition: height 0.3s ease-in-out;
+            box-shadow: 0 0 8px #00a8ff;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        Puntos: <span id="scoreVal">0</span>
+        <div id="ammo-display">Balas: <span id="ammoVal">6</span>/6</div>
+    </div>
+    
+    <div id="health-orb-container">
+        <div class="orb-title">NÚCLEO VITAL</div>
+        <div id="liquid-orb">
+            <div id="liquid-level"></div>
+        </div>
+    </div>
+    
+    <h1>★ INDIE 2D: TÁCTICO CON MUNICIÓN ★</h1>
+    <div id="canvas-container">
+        <canvas id="gameCanvas" width="600" height="350"></canvas>
+    </div>
+    <div class="instructions">
+        <b>A / D</b>: Moverse | <b>Espacio</b>: Saltar<br>
+        <b>Enter / F</b>: Disparar | <b>R</b>: Recargar Arma | <b>R (Game Over)</b>: Reiniciar
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let player = {
+            x: 60,
+            y: 240,
+            width: 35,
+            height: 35,
+            speed: 5,
+            dx: 0,
+            isJumping: false,
+            jumpY: 0,
+            jumpSpeed: 0
+        };
+
+        const groundLevel = 240;
+        let score = 0;
+        let health = 100;
+        let ammo = 6;
+        let maxAmmo = 6;
+        let isReloading = false;
+        let reloadTimer = 0;
+        let isGameOver = false;
+
+        let enemies = [];
+        let bullets = [];
+        let enemyProjectiles = [];
+        let spawnTimer = 0;
+        let damageCooldown = 0;
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') player.dx = -player.speed;
+            if (e.key === 'ArrowRight' || e.key === 'd') player.dx = player.speed;
+            
+            if (e.code === 'Space' && !player.isJumping && !isGameOver) {
+                player.isJumping = true;
+                player.jumpSpeed = -11;
+            }
+
+            // Disparar
+            if ((e.code === 'Enter' || e.code === 'KeyF') && !isGameOver && !isReloading) {
+                if (ammo > 0) {
+                    ammo--;
+                    updateAmmoUI();
+                    bullets.push({
+                        x: player.x + player.width,
+                        y: player.y + player.height / 2 - 4,
+                        width: 12,
+                        height: 8,
+                        speed: 8
+                    });
+                } else {
+                    // Sin balas: aviso visual rápido en UI
+                    document.getElementById('ammo-display').style.color = '#ff3366';
+                    setTimeout(() => { document.getElementById('ammo-display').style.color = '#ffaa00'; }, 300);
+                }
+            }
+
+            // Recargar o Reiniciar
+            if (e.key === 'r' || e.key === 'R') {
+                if (isGameOver) {
+                    resetGame();
+                } else if (!isReloading && ammo < maxAmmo) {
+                    startReload();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if ((e.key === 'ArrowLeft' || e.key === 'a') && player.dx < 0) player.dx = 0;
+            if ((e.key === 'ArrowRight' || e.key === 'd') && player.dx > 0) player.dx = 0;
+        });
+
+        function updateHealthUI() {
+            document.getElementById('liquid-level').style.height = health + '%';
+        }
+
+        function updateAmmoUI() {
+            if (isReloading) {
+                document.getElementById('ammoVal').innerText = "RECARGANDO...";
+            } else {
+                document.getElementById('ammoVal').innerText = ammo;
+            }
+        }
+
+        function startReload() {
+            isReloading = true;
+            updateAmmoUI();
+            reloadTimer = 45; // Duración de la recarga en frames (aprox 0.75 segundos)
+        }
+
+        function spawnEnemy() {
+            const type = Math.random() < 0.5 ? 'mushroom' : 'plant';
+            enemies.push({
+                type: type,
+                x: canvas.width + 50,
+                y: groundLevel,
+                size: 40,
+                speed: type === 'plant' ? 2.5 : 1.8,
+                hasAttacked: false
+            });
+        }
+
+        function resetGame() {
+            score = 0;
+            health = 100;
+            ammo = 6;
+            isReloading = false;
+            damageCooldown = 0;
+            updateHealthUI();
+            updateAmmoUI();
+            document.getElementById('scoreVal').innerText = score;
+            document.getElementById('ui').innerHTML = 'Puntos: <span id="scoreVal">0</span><div id="ammo-display">Balas: <span id="ammoVal">6</span>/6</div>';
+            enemies = [];
+            bullets = [];
+            enemyProjectiles = [];
+            player.x = 60;
+            player.isJumping = false;
+            isGameOver = false;
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!isGameOver) {
+                player.x += player.dx;
+                if (player.x < 15) player.x = 15;
+                if (player.x > canvas.width / 2) player.x = canvas.width / 2;
+
+                if (player.isJumping) {
+                    player.jumpY += player.jumpSpeed;
+                    player.jumpSpeed += 0.6;
+                    if (player.jumpY >= 0) {
+                        player.jumpY = 0;
+                        player.isJumping = false;
+                    }
+                }
+
+                if (damageCooldown > 0) damageCooldown--;
+
+                // Gestionar temporizador de recarga
+                if (isReloading) {
+                    reloadTimer--;
+                    if (reloadTimer <= 0) {
+                        ammo = maxAmmo;
+                        isReloading = false;
+                        updateAmmoUI();
+                    }
+                }
+
+                spawnTimer++;
+                if (spawnTimer > 65) {
+                    spawnEnemy();
+                    spawnTimer = 0;
+                }
+
+                // Actualizar Balas del Jugador
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    bullets[i].x += bullets[i].speed;
+                    if (bullets[i].x > canvas.width + 20) {
+                        bullets.splice(i, 1);
+                        continue;
+                    }
+
+                    for (let j = enemies.length - 1; j >= 0; j--) {
+                        let en = enemies[j];
+                        if (
+                            bullets[i] &&
+                            bullets[i].x < en.x + en.size &&
+                            bullets[i].x + bullets[i].width > en.x &&
+                            bullets[i].y < en.y + en.size &&
+                            bullets[i].y + bullets[i].height > en.y
+                        ) {
+                            score += en.type === 'plant' ? 35 : 25;
+                            document.getElementById('scoreVal').innerText = score;
+                            enemies.splice(j, 1);
+                            bullets.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+
+                // Actualizar Proyectiles Enemigos
+                for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+                    let ep = enemyProjectiles[i];
+                    ep.x -= ep.speed;
+
+                    let pDrawY = player.y + player.jumpY;
+                    if (
+                        damageCooldown === 0 &&
+                        player.x < ep.x + ep.size &&
+                        player.x + player.width > ep.x &&
+                        pDrawY < ep.y + ep.size &&
+                        pDrawY + player.height > ep.y
+                    ) {
+                        health -= 20;
+                        if (health < 0) health = 0;
+                        updateHealthUI();
+                        damageCooldown = 30;
+                        enemyProjectiles.splice(i, 1);
+
+                        if (health <= 0) {
+                            isGameOver = true;
+                            document.getElementById('ui').innerHTML = "¡GAME OVER!<br>Presiona 'R'";
+                        }
+                        continue;
+                    }
+
+                    if (ep.x < -20) enemyProjectiles.splice(i, 1);
+                }
+
+                // Actualizar Enemigos
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    let en = enemies[i];
+                    en.x -= en.speed;
+
+                    if (en.type === 'mushroom' && !en.hasAttacked && en.x < 350) {
+                        en.hasAttacked = true;
+                        enemyProjectiles.push({
+                            x: en.x,
+                            y: en.y + 10,
+                            size: 10,
+                            speed: 4.5
+                        });
+                    }
+
+                    if (en.type === 'plant' && !en.hasAttacked && en.x < 280) {
+                        en.hasAttacked = true;
+                        en.speed = 5.5;
+                    }
+
+                    let pDrawY = player.y + player.jumpY;
+                    if (
+                        damageCooldown === 0 &&
+                        player.x < en.x + en.size &&
+                        player.x + player.width > en.x &&
+                        pDrawY < en.y + en.size &&
+                        pDrawY + player.height > en.y
+                    ) {
+                        health -= 34;
+                        if (health < 0) health = 0;
+                        updateHealthUI();
+                        damageCooldown = 30;
+
+                        if (health <= 0) {
+                            isGameOver = true;
+                            document.getElementById('ui').innerHTML = "¡GAME OVER!<br>Presiona 'R'";
+                        }
+                    }
+
+                    if (en.x < -60) {
+                        enemies.splice(i, 1);
+                    }
+                }
+            }
+
+            // --- DIBUJAR JUGADOR ---
+            let drawY = player.y + player.jumpY;
+            ctx.fillStyle = damageCooldown > 15 && Math.floor(damageCooldown / 3) % 2 === 0 ? '#fff' : '#ff3366';
+            ctx.fillRect(player.x, drawY, player.width, player.height);
+            
+            // Cañón del jugador (parpadea si está recargando)
+            ctx.fillStyle = isReloading && Math.floor(Date.now() / 100) % 2 === 0 ? '#fff' : '#ffaa00';
+            ctx.fillRect(player.x + player.width - 2, drawY + 10, 10, 8);
+
+            // --- DIBUJAR BALAS DEL JUGADOR ---
+            ctx.fillStyle = '#ffaa00';
+            bullets.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+            // --- DIBUJAR ESPORAS ---
+            ctx.fillStyle = '#a29bfe';
+            enemyProjectiles.forEach(ep => {
+                ctx.beginPath();
+                ctx.arc(ep.x, ep.y, ep.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // --- DIBUJAR ENEMIGOS ---
+            enemies.forEach(en => {
+                let cx = en.x + en.size / 2;
+                let cy = en.y + en.size / 2;
+
+                if (en.type === 'mushroom') {
+                    ctx.fillStyle = '#f5f6fa';
+                    ctx.fillRect(cx - 5, cy + 5, 10, 15);
+                    ctx.fillStyle = '#eb3b5a';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 15, Math.PI, 0, false);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(cx - 5, cy - 5, 3, 0, Math.PI * 2);
+                    ctx.arc(cx + 6, cy - 3, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = '#6ab04c';
+                    ctx.beginPath();
+                    ctx.moveTo(cx - 10, cy + 10);
+                    ctx.lineTo(cx - 25, cy + 5);
+                    ctx.lineTo(cx - 10, cy - 5);
+                    ctx.fill();
+
+                    ctx.fillStyle = en.hasAttacked ? '#e74c3c' : '#c42847';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy - 5, 16, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#f39c12';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy - 5, 9, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(cx - 3, cy - 10, 6, 4);
+                }
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        updateHealthUI();
+        updateAmmoUI();
+        gameLoop();
+    </script>
+</body>
+</html>
